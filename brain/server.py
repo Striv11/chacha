@@ -11,6 +11,17 @@ from .config import BRAIN_TOKEN, THINK_EVERY_MIN, KILL_FILE
 app = FastAPI(title="Chacha")
 
 
+@app.get("/app")
+def phone_app():
+    """The Android app, so a phone on the same Tailscale can install it by scanning a code. Holds no secrets."""
+    from fastapi.responses import FileResponse
+    from .config import ROOT
+    apk = ROOT / "phone" / "Chacha.apk"
+    if not apk.exists():
+        raise HTTPException(404, "The Chacha app file is missing from the laptop's 'phone' folder.")
+    return FileResponse(apk, media_type="application/vnd.android.package-archive", filename="Chacha.apk")
+
+
 def auth(token):
     if not BRAIN_TOKEN or not secrets.compare_digest(token.encode(), BRAIN_TOKEN.encode()):
         raise HTTPException(401, "bad token")
