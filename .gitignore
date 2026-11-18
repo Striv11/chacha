@@ -8,5 +8,8 @@ android/app/build/
 android/local.properties
 .idea/
 web/node_modules/
+web/*.tsbuildinfo
+web/vite.config.js
+web/vite.config.d.ts
 
 Chacha-tester*.zip
