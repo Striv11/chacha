@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
-from . import db, think, agents, voice, llm, gmail, telegram
+from . import db, think, agents, voice, llm, gmail, google_calendar, telegram
 import re
 from .banking import is_banking
 from .config import BRAIN_TOKEN, THINK_EVERY_MIN, KILL_FILE, ROOT
@@ -294,6 +294,35 @@ def notifications(since: int = 0, x_token: str = Header("")):
 def tasks(x_token: str = Header("")):
     auth(x_token)
     return db.rows("SELECT * FROM tasks WHERE status='open' ORDER BY due")
+
+
+@app.get("/integrations")
+def integrations(x_token: str = Header("")):
+    auth(x_token)
+    google = gmail.status()
+    google["calendar_synced_at"] = float(db.get("google_calendar_sync", "0") or 0)
+    return {"google": google}
+
+
+@app.post("/integrations/google/connect")
+def google_connect(x_token: str = Header("")):
+    auth(x_token)
+    if not gmail.configured():
+        raise HTTPException(409, "Add data/google_client.json first.")
+    return gmail.start_login()
+
+
+@app.post("/integrations/google/sync")
+def google_sync(x_token: str = Header("")):
+    auth(x_token)
+    if not gmail.connected():
+        raise HTTPException(409, "Google is not connected yet.")
+    try:
+        calendar = google_calendar.sync()
+        think.watch_inbox()
+    except Exception as e:
+        raise HTTPException(502, f"Google sync failed: {type(e).__name__}") from e
+    return {"ok": True, "calendar": calendar}
 
 
 @app.post("/tasks/{tid}/done")

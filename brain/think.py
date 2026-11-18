@@ -3,7 +3,7 @@ Every few minutes: understand new items -> update people/tasks/memories -> check
 reminders -> morning/evening brief -> notice things worth acting on -> propose agents."""
 import re, time, datetime, json, traceback
 import httpx
-from . import db, llm, agents, tools, maps, gmail
+from . import db, llm, agents, tools, maps, gmail, google_calendar
 
 TAG_PROMPT = """You process one message captured from the user's phone. Now: {now}.
 Learned user rules: {rules}
@@ -295,6 +295,7 @@ def _start_queued():
 
 def tick():
     n = _safely(process_new)
+    _safely(google_calendar.sync_if_due)
     _safely(due_reminders)
     _safely(event_alerts)
     _safely(place_reminders)

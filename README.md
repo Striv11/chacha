@@ -40,6 +40,18 @@ npm run dev
 
 Set `VITE_API_BASE=http://<your-tailscale-ip>:8765` for the Vite development server. Build the production bundle with `npm run build`, then restart Chacha.
 
+### Connect Gmail and Google Calendar
+
+This is optional and keeps OAuth credentials and tokens inside the ignored `data/` directory.
+
+1. In Google Cloud, enable the Gmail API and Google Calendar API for a project.
+2. Configure its OAuth consent screen and create an OAuth client of type **Desktop app**.
+3. Download the client JSON to `data/google_client.json`.
+4. Open the dashboard → **Connections** → **Connect Google**, then finish Google's consent screen.
+5. Select **Sync now** to import upcoming calendar events and check the inbox for follow-ups.
+
+Chacha requests read access to Gmail and Calendar plus permission to send mail and create calendar events. It never sends an email without a separate user approval.
+
 ---
 
 ## Part 1: The laptop (one double-click)

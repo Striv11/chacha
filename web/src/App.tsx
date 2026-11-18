@@ -5,6 +5,7 @@ import {
   Bot,
   Check,
   CheckCircle2,
+  CalendarDays,
   Circle,
   Clock3,
   Inbox,
@@ -13,6 +14,7 @@ import {
   LoaderCircle,
   LockKeyhole,
   LogOut,
+  Mail,
   MessageCircle,
   RefreshCw,
   Send,
@@ -33,7 +35,9 @@ type Notice = { id: number; ts: number; title: string; body: string; kind: strin
 type Agent = { id: number; goal: string; status: string; result?: string; question?: string; steps: number };
 type Settings = { brain: string; claude_ready: boolean };
 type AskResult = { id: number; status: string; result?: string; question?: string };
-type Dashboard = { tasks: Task[]; actions: Action[]; notices: Notice[]; agents: Agent[]; settings: Settings };
+type GoogleIntegration = { configured: boolean; connected: boolean; status: string; error?: string; email?: string; calendar_synced_at: number };
+type Integrations = { google: GoogleIntegration };
+type Dashboard = { tasks: Task[]; actions: Action[]; notices: Notice[]; agents: Agent[]; settings: Settings; integrations: Integrations };
 type ChatMessage = { role: "user" | "assistant"; text: string };
 
 const TOKEN_KEY = "chacha.brain-token";
@@ -147,18 +151,21 @@ function DashboardApp({ token, disconnect }: { token: string; disconnect: () => 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [brief, setBrief] = useState("");
   const [briefing, setBriefing] = useState(false);
+  const [integrationBusy, setIntegrationBusy] = useState(false);
+  const [integrationNote, setIntegrationNote] = useState("");
 
   const load = useCallback(async () => {
     setError("");
     try {
-      const [tasks, actions, notices, agents, settings] = await Promise.all([
+      const [tasks, actions, notices, agents, settings, integrations] = await Promise.all([
         api<Task[]>("/tasks", token),
         api<Action[]>("/actions", token),
         api<Notice[]>("/notifications?since=0", token),
         api<Agent[]>("/agents", token),
         api<Settings>("/settings", token),
+        api<Integrations>("/integrations", token),
       ]);
-      setData({ tasks, actions, notices, agents, settings });
+      setData({ tasks, actions, notices, agents, settings, integrations });
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) disconnect();
       else setError("Could not refresh Chacha. The local brain may be restarting.");
@@ -168,6 +175,12 @@ function DashboardApp({ token, disconnect }: { token: string; disconnect: () => 
   }, [disconnect, token]);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    if (data?.integrations.google.status !== "waiting") return;
+    const poll = window.setInterval(() => void load(), 2500);
+    return () => window.clearInterval(poll);
+  }, [data?.integrations.google.status, load]);
 
   const activeAgents = useMemo(() => data?.agents.filter((agent) => ["queued", "running", "waiting", "proposed"].includes(agent.status)) || [], [data]);
   const latestNotices = useMemo(() => [...(data?.notices || [])].sort((a, b) => b.id - a.id).slice(0, 6), [data]);
@@ -211,6 +224,34 @@ function DashboardApp({ token, disconnect }: { token: string; disconnect: () => 
     }
   }
 
+  async function connectGoogle() {
+    setIntegrationBusy(true);
+    setIntegrationNote("");
+    try {
+      await api("/integrations/google/connect", token, { method: "POST", body: "{}" });
+      setIntegrationNote("Google sign-in opened on this Mac. Finish the consent screen, then return here.");
+      await load();
+    } catch (err) {
+      setIntegrationNote(err instanceof Error ? err.message : "Could not start Google sign-in.");
+    } finally {
+      setIntegrationBusy(false);
+    }
+  }
+
+  async function syncGoogle() {
+    setIntegrationBusy(true);
+    setIntegrationNote("");
+    try {
+      const result = await api<{ calendar: { events: number } }>("/integrations/google/sync", token, { method: "POST", body: "{}" });
+      setIntegrationNote(`Synced ${result.calendar.events} calendar events and checked the inbox.`);
+      await load();
+    } catch (err) {
+      setIntegrationNote(err instanceof Error ? err.message : "Google sync failed.");
+    } finally {
+      setIntegrationBusy(false);
+    }
+  }
+
   if (loading) {
     return <div className="grid min-h-screen place-items-center bg-[#f5f2ea]"><LoaderCircle className="animate-spin text-orange-500" /></div>;
   }
@@ -224,6 +265,7 @@ function DashboardApp({ token, disconnect }: { token: string; disconnect: () => 
             <nav className="hidden items-center gap-1 md:flex">
               <button className="rounded-full bg-white px-4 py-2 text-sm font-semibold shadow-sm">Today</button>
               <button className="rounded-full px-4 py-2 text-sm text-stone-500 hover:bg-white/60" onClick={() => setChatOpen(true)}>Ask</button>
+              <button className="rounded-full px-4 py-2 text-sm text-stone-500 hover:bg-white/60" onClick={() => document.getElementById("connections")?.scrollIntoView({ behavior: "smooth" })}>Connections</button>
             </nav>
           </div>
           <div className="flex items-center gap-2">
@@ -251,6 +293,35 @@ function DashboardApp({ token, disconnect }: { token: string; disconnect: () => 
           <Stat icon={Inbox} label="Pending approvals" value={data?.actions.length || 0} tone="bg-violet-100 text-violet-700" />
           <Stat icon={Bot} label="Agents working" value={activeAgents.length} tone="bg-sky-100 text-sky-700" />
           <Stat icon={Activity} label="Recent signals" value={latestNotices.length} tone="bg-emerald-100 text-emerald-700" />
+        </section>
+
+        <section id="connections" className="mt-4 scroll-mt-24">
+          <Card className="overflow-hidden">
+            <div className="grid md:grid-cols-[1fr_auto]">
+              <div className="flex gap-4 p-5 md:p-6">
+                <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-blue-50 text-blue-700"><Mail size={19} /></div>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2"><h2 className="font-semibold">Google Workspace</h2>{data?.integrations.google.connected ? <Badge className="bg-emerald-50 text-emerald-700">Connected</Badge> : <Badge>Not connected</Badge>}</div>
+                  <p className="mt-1 text-sm leading-6 text-stone-500">
+                    {data?.integrations.google.connected
+                      ? `${data.integrations.google.email || "Google account"} · Gmail follow-ups and Calendar context are available.`
+                      : "Connect Gmail and Google Calendar so Chacha can catch follow-ups and prepare your day without an Android phone."}
+                  </p>
+                  {!data?.integrations.google.configured && <p className="mt-2 text-xs text-amber-700">Setup needed: add a Google Desktop OAuth client as <code className="rounded bg-amber-50 px-1.5 py-0.5">data/google_client.json</code>.</p>}
+                  {data?.integrations.google.connected && data.integrations.google.calendar_synced_at > 0 && <p className="mt-2 flex items-center gap-1.5 text-xs text-stone-400"><CalendarDays size={13} /> Last synced {timeAgo(data.integrations.google.calendar_synced_at)}</p>}
+                  {integrationNote && <p className="mt-2 text-xs text-blue-700">{integrationNote}</p>}
+                  {data?.integrations.google.error && <p className="mt-2 text-xs text-red-600">{data.integrations.google.error}</p>}
+                </div>
+              </div>
+              <div className="flex items-center border-t border-stone-100 px-5 py-4 md:border-l md:border-t-0">
+                {data?.integrations.google.connected ? (
+                  <Button variant="outline" onClick={() => void syncGoogle()} disabled={integrationBusy}>{integrationBusy ? <LoaderCircle className="animate-spin" size={16} /> : <RefreshCw size={16} />} Sync now</Button>
+                ) : (
+                  <Button onClick={() => void connectGoogle()} disabled={integrationBusy || !data?.integrations.google.configured}>{integrationBusy || data?.integrations.google.status === "waiting" ? <LoaderCircle className="animate-spin" size={16} /> : <ArrowRight size={16} />} Connect Google</Button>
+                )}
+              </div>
+            </div>
+          </Card>
         </section>
 
         <section className="mt-4 grid gap-4 xl:grid-cols-[1.2fr_.8fr]">
