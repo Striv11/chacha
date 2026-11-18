@@ -1,6 +1,6 @@
 # Chacha: your private assistant
 
-Chacha lives on your **Windows laptop** and your **Android phone**. It listens, reads your screen when you ask, remembers things and does them for you.
+Chacha lives on your **Mac or Windows laptop**, with an optional **Android phone**. It listens, remembers, catches follow-ups and helps get things done.
 The AI runs **on your own laptop**. Your data never goes to an online AI unless you switch that on yourself.
 
 ---
@@ -9,8 +9,8 @@ The AI runs **on your own laptop**. Your data never goes to an online AI unless 
 
 | | |
 |---|---|
-| Laptop | Windows 10 or 11, 8 GB memory or more (16 GB is better), **12 GB free space** |
-| Phone | Android 8 or newer |
+| Laptop | macOS or Windows 10/11, 8 GB memory or more (16 GB is better), **12 GB free space** |
+| Phone | Optional. Android 8 or newer for phone notifications, calls, location and cross-app actions. |
 | Internet | For the setup (it downloads about 6 GB once). After that Chacha works without it, as long as phone and laptop can reach each other. |
 | Time | About 30 minutes, mostly waiting |
 
@@ -56,7 +56,18 @@ Chacha requests read access to Gmail and Calendar plus permission to send mail a
 
 ---
 
-## Part 1: The laptop (one double-click)
+## macOS setup
+
+1. Keep the Chacha folder somewhere permanent with at least 10 GB free.
+2. Double-click **`Install Chacha.command`**. If macOS blocks it, right-click it and choose **Open** once.
+3. The installer checks the Mac, installs local dependencies with Homebrew, downloads the private AI models and starts Chacha at login.
+4. When the dashboard opens, paste `BRAIN_TOKEN` from the local `.env` file once.
+
+Run `.venv/bin/python scripts/doctor.py` any time for a read-only setup health check. The macOS installer is safe to rerun and skips work that is already complete.
+
+---
+
+## Windows setup (one double-click)
 
 1. **Unzip** the Chacha folder somewhere you'll keep it, for example `Documents\Chacha`. (Right-click the zip → *Extract All*.) Don't run it from inside the zip.
 2. Double-click **`Install Chacha`**.
@@ -68,9 +79,9 @@ Chacha requests read access to Gmail and Calendar plus permission to send mail a
 4. **Two moments need you:**
    - **Tailscale sign-in**: a browser opens. Sign in with Google, Microsoft or Apple. **Remember which account**, because you'll use the same one on your phone.
    - **"Do you want to allow this app to make changes?"**: click **Yes**. This lets only your own phone reach Chacha.
-5. At the end a page opens in your browser called **"Set up your phone"**. Go to Part 2.
+5. At the end a page opens in your browser called **"Set up your phone"**. Follow the optional phone setup below.
 
-## Part 2: The phone (follow the page)
+## Optional Android phone setup
 
 The page has 3 steps, each with a code you scan:
 
