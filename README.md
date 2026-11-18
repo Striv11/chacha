@@ -24,7 +24,7 @@ The private web dashboard works on macOS and Windows, with or without an Android
 
 1. Start Chacha, then open `http://<your-tailscale-ip>:8765` on the laptop.
 2. Paste `BRAIN_TOKEN` from the local `.env` file when the dashboard asks to connect.
-3. Use **Ask Chacha**, review source-backed follow-ups, prepare replies, manage tasks and approvals, or generate a private daily brief.
+3. Use **Ask Chacha**, review source-backed follow-ups, prepare replies, manage tasks and approvals, inspect or correct Chacha's memory, or generate a private daily brief.
 
 The token is stored only in that browser. Phone-only context—notifications, calls, contacts and location—stays empty until an Android phone is connected, but chat, local memory, agents, tasks, vision, voice and the web dashboard work without one.
 

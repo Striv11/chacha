@@ -378,6 +378,43 @@ def feedback(r: Reply, x_token: str = Header("")):
     return {"ok": True}
 
 
+@app.get("/memories")
+def memories(x_token: str = Header("")):
+    auth(x_token)
+    return db.rows("SELECT id,ts,fact FROM memories ORDER BY id DESC LIMIT 250")
+
+
+@app.post("/memories")
+def add_memory(r: Reply, x_token: str = Header("")):
+    auth(x_token)
+    fact = r.text.strip()
+    if not fact:
+        raise HTTPException(422, "memory cannot be empty")
+    mid = db.run("INSERT INTO memories(ts,fact) VALUES (?,?)", (time.time(), fact[:1000]))
+    return {"id": mid, "fact": fact[:1000]}
+
+
+@app.patch("/memories/{mid}")
+def edit_memory(mid: int, r: Reply, x_token: str = Header("")):
+    auth(x_token)
+    fact = r.text.strip()
+    if not fact:
+        raise HTTPException(422, "memory cannot be empty")
+    if not db.rows("SELECT 1 FROM memories WHERE id=?", (mid,)):
+        raise HTTPException(404, "memory not found")
+    db.run("UPDATE memories SET fact=? WHERE id=?", (fact[:1000], mid))
+    return {"ok": True}
+
+
+@app.delete("/memories/{mid}")
+def delete_memory(mid: int, x_token: str = Header("")):
+    auth(x_token)
+    if not db.rows("SELECT 1 FROM memories WHERE id=?", (mid,)):
+        raise HTTPException(404, "memory not found")
+    db.run("DELETE FROM memories WHERE id=?", (mid,))
+    return {"ok": True}
+
+
 @app.post("/brief")
 def brief_now(x_token: str = Header("")):
     auth(x_token)

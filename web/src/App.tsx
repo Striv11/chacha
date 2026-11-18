@@ -2,6 +2,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   Bot,
+  Brain,
   Check,
   CheckCircle2,
   CalendarDays,
@@ -15,10 +16,13 @@ import {
   LogOut,
   Mail,
   MessageCircle,
+  Pencil,
   RefreshCw,
   Send,
+  Save,
   ShieldCheck,
   Sparkles,
+  Trash2,
   X,
 } from "lucide-react";
 import { api, ApiError } from "./lib/api";
@@ -33,11 +37,12 @@ type Action = { id: number; kind: string; summary: string; payload: string };
 type Notice = { id: number; ts: number; title: string; body: string; kind: string; seen: number };
 type Agent = { id: number; goal: string; status: string; result?: string; question?: string; steps: number };
 type Followup = { id: number; ts: number; source: string; app: string; person: string; summary: string; text: string; importance: number; raw?: string };
+type Memory = { id: number; ts: number; fact: string };
 type Settings = { brain: string; claude_ready: boolean };
 type AskResult = { id: number; status: string; result?: string; question?: string };
 type GoogleIntegration = { configured: boolean; connected: boolean; status: string; error?: string; email?: string; calendar_synced_at: number };
 type Integrations = { google: GoogleIntegration };
-type Dashboard = { tasks: Task[]; actions: Action[]; notices: Notice[]; agents: Agent[]; followups: Followup[]; settings: Settings; integrations: Integrations };
+type Dashboard = { tasks: Task[]; actions: Action[]; notices: Notice[]; agents: Agent[]; followups: Followup[]; memories: Memory[]; settings: Settings; integrations: Integrations };
 type ChatMessage = { role: "user" | "assistant"; text: string };
 
 const TOKEN_KEY = "chacha.brain-token";
@@ -155,20 +160,27 @@ function DashboardApp({ token, disconnect }: { token: string; disconnect: () => 
   const [integrationNote, setIntegrationNote] = useState("");
   const [drafts, setDrafts] = useState<Record<number, string>>({});
   const [drafting, setDrafting] = useState<number | null>(null);
+  const [memoryOpen, setMemoryOpen] = useState(false);
+  const [newMemory, setNewMemory] = useState("");
+  const [editingMemory, setEditingMemory] = useState<number | null>(null);
+  const [memoryText, setMemoryText] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const [memoryBusy, setMemoryBusy] = useState(false);
 
   const load = useCallback(async () => {
     setError("");
     try {
-      const [tasks, actions, notices, agents, followups, settings, integrations] = await Promise.all([
+      const [tasks, actions, notices, agents, followups, memories, settings, integrations] = await Promise.all([
         api<Task[]>("/tasks", token),
         api<Action[]>("/actions", token),
         api<Notice[]>("/notifications?since=0", token),
         api<Agent[]>("/agents", token),
         api<Followup[]>("/followups", token),
+        api<Memory[]>("/memories", token),
         api<Settings>("/settings", token),
         api<Integrations>("/integrations", token),
       ]);
-      setData({ tasks, actions, notices, agents, followups, settings, integrations });
+      setData({ tasks, actions, notices, agents, followups, memories, settings, integrations });
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) disconnect();
       else setError("Could not refresh Chacha. The local brain may be restarting.");
@@ -276,6 +288,45 @@ function DashboardApp({ token, disconnect }: { token: string; disconnect: () => 
     }
   }
 
+  async function addMemory(event: FormEvent) {
+    event.preventDefault();
+    const text = newMemory.trim();
+    if (!text) return;
+    setMemoryBusy(true);
+    try {
+      await api("/memories", token, { method: "POST", body: JSON.stringify({ text }) });
+      setNewMemory("");
+      await load();
+    } finally {
+      setMemoryBusy(false);
+    }
+  }
+
+  async function saveMemory(id: number) {
+    const text = memoryText.trim();
+    if (!text) return;
+    setMemoryBusy(true);
+    try {
+      await api(`/memories/${id}`, token, { method: "PATCH", body: JSON.stringify({ text }) });
+      setEditingMemory(null);
+      setMemoryText("");
+      await load();
+    } finally {
+      setMemoryBusy(false);
+    }
+  }
+
+  async function removeMemory(id: number) {
+    setMemoryBusy(true);
+    try {
+      await api(`/memories/${id}`, token, { method: "DELETE" });
+      setConfirmDelete(null);
+      await load();
+    } finally {
+      setMemoryBusy(false);
+    }
+  }
+
   if (loading) {
     return <div className="grid min-h-screen place-items-center bg-[#f5f2ea]"><LoaderCircle className="animate-spin text-orange-500" /></div>;
   }
@@ -289,6 +340,7 @@ function DashboardApp({ token, disconnect }: { token: string; disconnect: () => 
             <nav className="hidden items-center gap-1 md:flex">
               <button className="rounded-full bg-white px-4 py-2 text-sm font-semibold shadow-sm">Today</button>
               <button className="rounded-full px-4 py-2 text-sm text-stone-500 hover:bg-white/60" onClick={() => setChatOpen(true)}>Ask</button>
+              <button className="rounded-full px-4 py-2 text-sm text-stone-500 hover:bg-white/60" onClick={() => setMemoryOpen(true)}>Memory</button>
               <button className="rounded-full px-4 py-2 text-sm text-stone-500 hover:bg-white/60" onClick={() => document.getElementById("connections")?.scrollIntoView({ behavior: "smooth" })}>Connections</button>
             </nav>
           </div>
@@ -468,6 +520,34 @@ function DashboardApp({ token, disconnect }: { token: string; disconnect: () => 
                 <Button size="icon" disabled={!question.trim() || asking} aria-label="Send"><Send size={16} /></Button>
               </div>
             </form>
+          </aside>
+        </div>
+      )}
+
+      {memoryOpen && (
+        <div className="fixed inset-0 z-50 bg-stone-950/20 backdrop-blur-[2px]" onMouseDown={() => setMemoryOpen(false)}>
+          <aside className="ml-auto flex h-full w-full max-w-xl flex-col bg-[#fbfaf7] shadow-2xl" onMouseDown={(event) => event.stopPropagation()}>
+            <header className="flex h-16 items-center justify-between border-b border-stone-200 px-5">
+              <div><p className="flex items-center gap-2 font-semibold"><Brain size={17} /> Chacha’s memory</p><p className="text-xs text-stone-400">Everything remembered is visible and editable</p></div>
+              <Button variant="ghost" size="icon" onClick={() => setMemoryOpen(false)}><X size={18} /></Button>
+            </header>
+            <form onSubmit={addMemory} className="border-b border-stone-200 bg-white p-4">
+              <label className="text-xs font-bold uppercase tracking-[.12em] text-stone-500" htmlFor="new-memory">Remember something</label>
+              <div className="mt-2 flex gap-2"><Input id="new-memory" value={newMemory} onChange={(event) => setNewMemory(event.target.value)} placeholder="e.g. I prefer morning meetings" /><Button disabled={!newMemory.trim() || memoryBusy}><Sparkles size={15} /> Remember</Button></div>
+            </form>
+            <div className="flex-1 space-y-2 overflow-y-auto p-4">
+              {!data?.memories.length && <Empty>Chacha has no durable memories yet.</Empty>}
+              {data?.memories.map((memory) => (
+                <div key={memory.id} className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm">
+                  {editingMemory === memory.id ? (
+                    <div><Input autoFocus value={memoryText} onChange={(event) => setMemoryText(event.target.value)} /><div className="mt-3 flex justify-end gap-2"><Button variant="ghost" size="sm" onClick={() => setEditingMemory(null)}>Cancel</Button><Button size="sm" onClick={() => void saveMemory(memory.id)} disabled={!memoryText.trim() || memoryBusy}><Save size={14} /> Save</Button></div></div>
+                  ) : (
+                    <div className="flex items-start gap-3"><div className="min-w-0 flex-1"><p className="text-sm leading-6 text-stone-700">{memory.fact}</p><p className="mt-2 text-[11px] text-stone-400">Remembered {timeAgo(memory.ts)}</p></div><Button variant="ghost" size="icon" onClick={() => { setEditingMemory(memory.id); setMemoryText(memory.fact); }} aria-label="Edit memory"><Pencil size={15} /></Button>{confirmDelete === memory.id ? <div className="flex items-center gap-1"><Button variant="danger" size="sm" onClick={() => void removeMemory(memory.id)} disabled={memoryBusy}>Delete?</Button><Button variant="ghost" size="sm" onClick={() => setConfirmDelete(null)}>Cancel</Button></div> : <Button variant="ghost" size="icon" onClick={() => setConfirmDelete(memory.id)} aria-label="Delete memory"><Trash2 size={15} /></Button>}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+            <footer className="border-t border-stone-200 bg-white px-5 py-4 text-xs leading-5 text-stone-400">Memories stay in <code>data/brain.db</code> on this Mac while Chacha is in offline mode.</footer>
           </aside>
         </div>
       )}
