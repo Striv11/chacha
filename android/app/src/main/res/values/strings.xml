@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_description">Tap to talk to Chacha</string>
+    <string name="accessibility_description">Lets Chacha see messages you send in WhatsApp, Telegram and Instagram, and operate listed apps when you approve a task. It cannot see any other app, including banking apps.</string>
+</resources>
