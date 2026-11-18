@@ -1,14 +1,58 @@
 """HTTP API the phone talks to (over Tailscale). Run: python -m brain.server"""
 import time, json, threading, traceback, secrets, shutil, subprocess
 from fastapi import Body, FastAPI, Header, HTTPException
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
-from . import db, think, agents, voice, llm, gmail, telegram
+from . import db, think, agents, voice, llm, gmail, google_calendar, telegram
 import re
 from .banking import is_banking
-from .config import BRAIN_TOKEN, THINK_EVERY_MIN, KILL_FILE
+from .config import BRAIN_TOKEN, THINK_EVERY_MIN, KILL_FILE, ROOT
 
 app = FastAPI(title="Chacha")
+WEB_DIST = ROOT / "web/dist"
+if (WEB_DIST / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=WEB_DIST / "assets"), name="web-assets")
+
+
+@app.get("/", include_in_schema=False)
+def home():
+    """The web dashboard, with a small status page as the source-build fallback."""
+    dashboard = WEB_DIST / "index.html"
+    if dashboard.exists():
+        return FileResponse(dashboard)
+    return HTMLResponse("""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chacha is running</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    body { min-height: 100vh; margin: 0; display: grid; place-items: center; background: #0b1020; color: #f8fafc; }
+    main { width: min(520px, calc(100% - 48px)); padding: 40px; border: 1px solid #27324a; border-radius: 24px; background: #121a2d; box-shadow: 0 24px 80px #0008; }
+    .status { display: inline-flex; align-items: center; gap: 9px; color: #86efac; font-weight: 700; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 16px #22c55e; }
+    h1 { margin: 18px 0 10px; font-size: clamp(34px, 8vw, 56px); letter-spacing: -0.04em; }
+    p { color: #b6c2d9; font-size: 17px; line-height: 1.6; }
+    a { display: inline-block; margin-top: 18px; padding: 13px 18px; border-radius: 12px; background: #2563eb; color: white; font-weight: 700; text-decoration: none; }
+    small { display: block; margin-top: 24px; color: #74819a; }
+  </style>
+</head>
+<body><main>
+  <div class="status"><span class="dot"></span>Online</div>
+  <h1>Chacha is running.</h1>
+  <p>Your private assistant backend is online on this Mac. We can now build and test the browser or iPhone experience on top of it.</p>
+  <a href="/docs">Open developer API</a>
+  <small>This address is private to your Tailscale network.</small>
+</main></body>
+</html>""")
+
+
+@app.get("/health", include_in_schema=False)
+def health():
+    return {"status": "ok"}
 
 
 @app.get("/app")
@@ -252,6 +296,73 @@ def tasks(x_token: str = Header("")):
     return db.rows("SELECT * FROM tasks WHERE status='open' ORDER BY due")
 
 
+@app.get("/followups")
+def followups(x_token: str = Header("")):
+    auth(x_token)
+    return db.rows("""SELECT i.id,i.ts,i.source,i.app,i.person,i.summary,i.text,i.importance,i.raw
+                      FROM items i
+                      WHERE i.category='needs_reply' AND i.direction='in' AND i.resolved=0
+                        AND NOT EXISTS (
+                          SELECT 1 FROM items reply
+                          WHERE reply.person=i.person AND reply.direction='out' AND reply.ts>i.ts
+                        )
+                      ORDER BY COALESCE(i.importance,0) DESC, i.ts DESC LIMIT 40""")
+
+
+@app.post("/followups/{iid}/done")
+def followup_done(iid: int, x_token: str = Header("")):
+    auth(x_token)
+    if not db.rows("SELECT 1 FROM items WHERE id=? AND category='needs_reply'", (iid,)):
+        raise HTTPException(404, "follow-up not found")
+    db.run("UPDATE items SET resolved=1 WHERE id=?", (iid,))
+    db.run("UPDATE tasks SET status='done' WHERE source_item=?", (iid,))
+    return {"ok": True}
+
+
+@app.post("/followups/{iid}/draft")
+def followup_draft(iid: int, x_token: str = Header("")):
+    auth(x_token)
+    rows = db.rows("SELECT person,text,summary FROM items WHERE id=? AND category='needs_reply'", (iid,))
+    if not rows:
+        raise HTTPException(404, "follow-up not found")
+    item = rows[0]
+    draft = llm.chat([{"role": "user", "content":
+        "Write the short reply the user should send. Match the language and tone. "
+        "Do not invent facts, dates or promises; if something is unknown, keep the reply open. "
+        "Return only the reply, with no label or quotation marks.\n"
+        f"From: {item['person']}\nMessage: {item['text'][:1800]}"}])
+    return {"text": draft.strip()}
+
+
+@app.get("/integrations")
+def integrations(x_token: str = Header("")):
+    auth(x_token)
+    google = gmail.status()
+    google["calendar_synced_at"] = float(db.get("google_calendar_sync", "0") or 0)
+    return {"google": google}
+
+
+@app.post("/integrations/google/connect")
+def google_connect(x_token: str = Header("")):
+    auth(x_token)
+    if not gmail.configured():
+        raise HTTPException(409, "Add data/google_client.json first.")
+    return gmail.start_login()
+
+
+@app.post("/integrations/google/sync")
+def google_sync(x_token: str = Header("")):
+    auth(x_token)
+    if not gmail.connected():
+        raise HTTPException(409, "Google is not connected yet.")
+    try:
+        calendar = google_calendar.sync()
+        think.watch_inbox()
+    except Exception as e:
+        raise HTTPException(502, f"Google sync failed: {type(e).__name__}") from e
+    return {"ok": True, "calendar": calendar}
+
+
 @app.post("/tasks/{tid}/done")
 def task_done(tid: int, x_token: str = Header("")):
     auth(x_token)
@@ -264,6 +375,43 @@ def feedback(r: Reply, x_token: str = Header("")):
     """e.g. 'Promo messages from Swiggy are never important' -> learned rule."""
     auth(x_token)
     db.run("INSERT INTO feedback(ts,rule) VALUES (?,?)", (time.time(), r.text))
+    return {"ok": True}
+
+
+@app.get("/memories")
+def memories(x_token: str = Header("")):
+    auth(x_token)
+    return db.rows("SELECT id,ts,fact FROM memories ORDER BY id DESC LIMIT 250")
+
+
+@app.post("/memories")
+def add_memory(r: Reply, x_token: str = Header("")):
+    auth(x_token)
+    fact = r.text.strip()
+    if not fact:
+        raise HTTPException(422, "memory cannot be empty")
+    mid = db.run("INSERT INTO memories(ts,fact) VALUES (?,?)", (time.time(), fact[:1000]))
+    return {"id": mid, "fact": fact[:1000]}
+
+
+@app.patch("/memories/{mid}")
+def edit_memory(mid: int, r: Reply, x_token: str = Header("")):
+    auth(x_token)
+    fact = r.text.strip()
+    if not fact:
+        raise HTTPException(422, "memory cannot be empty")
+    if not db.rows("SELECT 1 FROM memories WHERE id=?", (mid,)):
+        raise HTTPException(404, "memory not found")
+    db.run("UPDATE memories SET fact=? WHERE id=?", (fact[:1000], mid))
+    return {"ok": True}
+
+
+@app.delete("/memories/{mid}")
+def delete_memory(mid: int, x_token: str = Header("")):
+    auth(x_token)
+    if not db.rows("SELECT 1 FROM memories WHERE id=?", (mid,)):
+        raise HTTPException(404, "memory not found")
+    db.run("DELETE FROM memories WHERE id=?", (mid,))
     return {"ok": True}
 
 

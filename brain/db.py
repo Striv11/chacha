@@ -6,7 +6,8 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS items (           -- everything the phone/laptop captures
   id INTEGER PRIMARY KEY, ts REAL, source TEXT, app TEXT, person TEXT,
   direction TEXT, text TEXT, raw TEXT,
-  category TEXT, importance INTEGER, summary TEXT, processed INTEGER DEFAULT 0
+  category TEXT, importance INTEGER, summary TEXT, processed INTEGER DEFAULT 0,
+  resolved INTEGER DEFAULT 0
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS items_fts USING fts5(text, person, summary, content='items', content_rowid='id');
 CREATE TRIGGER IF NOT EXISTS items_ai AFTER INSERT ON items BEGIN
@@ -39,7 +40,8 @@ CREATE TABLE IF NOT EXISTS cloud_log (       -- audit: every text that ever left
 );
 CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS calendar (        -- replaced on every phone sync
-  id TEXT PRIMARY KEY, title TEXT, starts TEXT, ends TEXT, location TEXT, alerted INTEGER DEFAULT 0
+  id TEXT PRIMARY KEY, title TEXT, starts TEXT, ends TEXT, location TEXT, alerted INTEGER DEFAULT 0,
+  source TEXT DEFAULT 'phone'
 );
 CREATE TABLE IF NOT EXISTS contacts (name TEXT, number TEXT, PRIMARY KEY (name, number));
 CREATE TABLE IF NOT EXISTS calls (ts REAL, name TEXT, number TEXT, kind TEXT, PRIMARY KEY (ts, number));
@@ -81,6 +83,14 @@ def init():
         c.executescript(SCHEMA)
         try:
             c.execute("ALTER TABLE agents ADD COLUMN world INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            c.execute("ALTER TABLE calendar ADD COLUMN source TEXT DEFAULT 'phone'")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            c.execute("ALTER TABLE items ADD COLUMN resolved INTEGER DEFAULT 0")
         except sqlite3.OperationalError:
             pass
 

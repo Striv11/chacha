@@ -1,0 +1,83 @@
+[
+  {
+    "name": "direct dinner question",
+    "person": "Priya",
+    "text": "Dinner Saturday at 8 works for you?",
+    "categories": ["needs_reply"],
+    "min_importance": 4,
+    "needs_task": true
+  },
+  {
+    "name": "hinglish callback",
+    "person": "Aman",
+    "text": "Bhai free ho to call karna, client proposal discuss karna hai",
+    "categories": ["needs_reply", "task"],
+    "min_importance": 4,
+    "needs_task": true
+  },
+  {
+    "name": "deadline request",
+    "person": "Client",
+    "text": "Please send the revised proposal by Friday evening.",
+    "categories": ["task", "needs_reply"],
+    "min_importance": 4,
+    "needs_task": true
+  },
+  {
+    "name": "outgoing promise",
+    "person": "Neha",
+    "direction": "out",
+    "text": "I will send you the deck tomorrow morning.",
+    "categories": ["promise", "task"],
+    "min_importance": 3,
+    "needs_task": true
+  },
+  {
+    "name": "dated event",
+    "person": "Rohit",
+    "text": "Product meetup is on 25 November at 6 PM at Koramangala Social.",
+    "categories": ["event", "fyi"],
+    "min_importance": 2,
+    "needs_task": false
+  },
+  {
+    "name": "simple thanks",
+    "person": "Riya",
+    "text": "Thanks, got it!",
+    "categories": ["fyi"],
+    "max_importance": 2,
+    "needs_task": false
+  },
+  {
+    "name": "marketing spam",
+    "person": "Food App",
+    "text": "FLASH SALE! Get 50% OFF your next order. Tap now!",
+    "categories": ["spam"],
+    "max_importance": 0,
+    "needs_task": false
+  },
+  {
+    "name": "one time password",
+    "person": "Login Service",
+    "text": "482901 is your OTP. It expires in 10 minutes. Do not share it.",
+    "categories": ["otp"],
+    "max_importance": 0,
+    "needs_task": false
+  },
+  {
+    "name": "informational update",
+    "person": "Team",
+    "text": "FYI, tomorrow's office town hall recording will be shared later.",
+    "categories": ["fyi"],
+    "max_importance": 2,
+    "needs_task": false
+  },
+  {
+    "name": "approval question",
+    "person": "Designer",
+    "text": "Can you approve the homepage version today so we can ship?",
+    "categories": ["needs_reply", "task"],
+    "min_importance": 4,
+    "needs_task": true
+  }
+]

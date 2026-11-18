@@ -3,7 +3,7 @@ Every few minutes: understand new items -> update people/tasks/memories -> check
 reminders -> morning/evening brief -> notice things worth acting on -> propose agents."""
 import re, time, datetime, json, traceback
 import httpx
-from . import db, llm, agents, tools, maps, gmail
+from . import db, llm, agents, tools, maps, gmail, google_calendar
 
 TAG_PROMPT = """You process one message captured from the user's phone. Now: {now}.
 Learned user rules: {rules}
@@ -26,24 +26,49 @@ def rules():
     return "; ".join(r["rule"] for r in db.rows("SELECT rule FROM feedback ORDER BY id DESC LIMIT 20")) or "none"
 
 
-def _process_one(it, now, r):
-    if not (it["text"] or "").strip():
-        db.run("UPDATE items SET processed=1 WHERE id=?", (it["id"],))
-        return
+def classify_message(text, person="", direction="in", now=None, learned_rules=None):
+    """Classify one message without touching the database, so quality can be evaluated safely."""
+    now = now or datetime.datetime.now().strftime("%a %Y-%m-%d %H:%M")
+    who = (f"The USER sent this to {person} via chat:"
+           if direction == "out" else f"{person or 'Someone'} sent this to the user via chat:")
     out = llm.chat([{"role": "user", "content": TAG_PROMPT.format(
-        now=now, rules=r, text=it["text"][:2000],
-        who=(f"The USER sent this to {it['person']} via {it['app']}:" if it["direction"] == "out"
-             else f"{it['person'] or 'Someone'} sent this to the user via {it['app']}:"))}],
-        as_json=True)
+        now=now, rules=learned_rules or rules(), text=str(text)[:2000], who=who)}],
+        smart=True, as_json=True)
     out = out if isinstance(out, dict) else {}
     cat = str(out.get("category", "")).strip().lower()
     out["category"] = cat if cat in CATS else "fyi"
     try:
-        imp = max(0, min(5, int(out.get("importance") or 0)))
+        out["importance"] = max(0, min(5, int(out.get("importance") or 0)))
     except (TypeError, ValueError):
-        imp = 2
+        out["importance"] = 2
     if out["category"] in ("spam", "otp"):
-        out["tasks"], imp = [], 0
+        out["tasks"], out["importance"] = [], 0
+    out["tasks"] = [task for task in (out.get("tasks") or []) if isinstance(task, dict) and task.get("title")]
+    plain = " ".join(str(text).lower().split())
+    words = plain.split()
+    # Small models overthink polite acknowledgements; they are not follow-ups on their own.
+    acknowledgement = r"(thanks?|thank you|got it|okay|ok|cool|perfect|done)"
+    if len(words) <= 8 and re.fullmatch(rf"{acknowledgement}([,! ]+{acknowledgement})*[!. ]*", plain):
+        out.update(category="fyi", importance=0, tasks=[])
+    # A promise made by the user is worth tracking even when the model forgets to create the task.
+    if direction == "out" and out["category"] == "promise":
+        out["importance"] = max(3, out["importance"])
+        if not out["tasks"]:
+            title = str(out.get("summary") or f"Keep promise to {person or 'recipient'}").strip()
+            out["tasks"] = [{"title": title[:160], "due": "", "kind": "promise"}]
+    # A broadcast event is context, not a todo, unless the sender actually asks the user to act or reply.
+    request_words = r"\b(please|can you|could you|will you|confirm|reply|rsvp|join us|attend)\b|\?"
+    if out["category"] == "event" and not re.search(request_words, plain):
+        out["tasks"] = []
+    return out
+
+
+def _process_one(it, now, r):
+    if not (it["text"] or "").strip():
+        db.run("UPDATE items SET processed=1 WHERE id=?", (it["id"],))
+        return
+    out = classify_message(it["text"], it["person"], it["direction"], now, r)
+    imp = out["importance"]
     db.run("UPDATE items SET category=?, importance=?, summary=?, processed=1 WHERE id=?",
            (out.get("category"), imp, out.get("summary"), it["id"]))
     for t in out.get("tasks") or []:
@@ -295,6 +320,7 @@ def _start_queued():
 
 def tick():
     n = _safely(process_new)
+    _safely(google_calendar.sync_if_due)
     _safely(due_reminders)
     _safely(event_alerts)
     _safely(place_reminders)
@@ -342,7 +368,9 @@ def ask(question):
     db.run("UPDATE agents SET status='done', question=NULL WHERE origin='chat' AND status='waiting'")
     history = json.loads(db.get("chat_history", "[]"))
     context = "\n".join(f"{h['who']}: {h['text']}" for h in history)
-    goal = (f"Answer the user's message. Check your tools for anything about their life, calendar, people or the internet.\n"
+    goal = (f"Answer the user's message. For greetings, general questions, writing, or requests that need no personal data, "
+            "answer directly without calling a tool. Only check tools when the answer genuinely depends on the user's "
+            "calendar, tasks, people, messages, location, or current information.\n"
             "Never hand the user's question back to them, and don't ask what they mean when you can look it up. "
             "For questions about their day or plan, check the calendar AND open tasks, people waiting on a reply and reminders, "
             "then answer from that. If you really find nothing, say so in one line and suggest one useful next step.\n")

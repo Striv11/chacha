@@ -1,6 +1,6 @@
 # Chacha: your private assistant
 
-Chacha lives on your **Windows laptop** and your **Android phone**. It listens, reads your screen when you ask, remembers things and does them for you.
+Chacha lives on your **Mac or Windows laptop**, with an optional **Android phone**. It listens, remembers, catches follow-ups and helps get things done.
 The AI runs **on your own laptop**. Your data never goes to an online AI unless you switch that on yourself.
 
 ---
@@ -9,8 +9,8 @@ The AI runs **on your own laptop**. Your data never goes to an online AI unless 
 
 | | |
 |---|---|
-| Laptop | Windows 10 or 11, 8 GB memory or more (16 GB is better), **12 GB free space** |
-| Phone | Android 8 or newer |
+| Laptop | macOS or Windows 10/11, 8 GB memory or more (16 GB is better), **12 GB free space** |
+| Phone | Optional. Android 8 or newer for phone notifications, calls, location and cross-app actions. |
 | Internet | For the setup (it downloads about 6 GB once). After that Chacha works without it, as long as phone and laptop can reach each other. |
 | Time | About 30 minutes, mostly waiting |
 
@@ -18,7 +18,56 @@ Chacha works while the laptop is **on**. If the laptop is off or asleep, the pho
 
 ---
 
-## Part 1: The laptop (one double-click)
+## Use Chacha in a browser
+
+The private web dashboard works on macOS and Windows, with or without an Android phone.
+
+1. Start Chacha, then open `http://<your-tailscale-ip>:8765` on the laptop.
+2. Paste `BRAIN_TOKEN` from the local `.env` file when the dashboard asks to connect.
+3. Use **Ask Chacha**, review source-backed follow-ups, prepare replies, manage tasks and approvals, inspect or correct Chacha's memory, or generate a private daily brief.
+
+The token is stored only in that browser. Phone-only context—notifications, calls, contacts and location—stays empty until an Android phone is connected, but chat, local memory, agents, tasks, vision, voice and the web dashboard work without one.
+
+### Web development
+
+The dashboard source is in `web/` and the production bundle is served by FastAPI from `web/dist/`. Development requires Node.js 20.19 or newer.
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+Set `VITE_API_BASE=http://<your-tailscale-ip>:8765` for the Vite development server. Build the production bundle with `npm run build`, then restart Chacha.
+
+Run the fast unit suite with `.venv/bin/python -m unittest discover -s tests -v`. To measure real local-model follow-up quality against the English/Hinglish product cases, run `.venv/bin/python evals/run_followups.py` while Ollama is running.
+
+### Connect Gmail and Google Calendar
+
+This is optional and keeps OAuth credentials and tokens inside the ignored `data/` directory.
+
+1. In Google Cloud, enable the Gmail API and Google Calendar API for a project.
+2. Configure its OAuth consent screen and create an OAuth client of type **Desktop app**.
+3. Download the client JSON to `data/google_client.json`.
+4. Open the dashboard → **Connections** → **Connect Google**, then finish Google's consent screen.
+5. Select **Sync now** to import upcoming calendar events and check the inbox for follow-ups.
+
+Chacha requests read access to Gmail and Calendar plus permission to send mail and create calendar events. It never sends an email without a separate user approval.
+
+---
+
+## macOS setup
+
+1. Keep the Chacha folder somewhere permanent with at least 10 GB free.
+2. Double-click **`Install Chacha.command`**. If macOS blocks it, right-click it and choose **Open** once.
+3. The installer checks the Mac, installs local dependencies with Homebrew, downloads the private AI models and starts Chacha at login.
+4. When the dashboard opens, paste `BRAIN_TOKEN` from the local `.env` file once.
+
+Run `.venv/bin/python scripts/doctor.py` any time for a read-only setup health check. The macOS installer is safe to rerun and skips work that is already complete.
+
+---
+
+## Windows setup (one double-click)
 
 1. **Unzip** the Chacha folder somewhere you'll keep it, for example `Documents\Chacha`. (Right-click the zip → *Extract All*.) Don't run it from inside the zip.
 2. Double-click **`Install Chacha`**.
@@ -30,9 +79,9 @@ Chacha works while the laptop is **on**. If the laptop is off or asleep, the pho
 4. **Two moments need you:**
    - **Tailscale sign-in**: a browser opens. Sign in with Google, Microsoft or Apple. **Remember which account**, because you'll use the same one on your phone.
    - **"Do you want to allow this app to make changes?"**: click **Yes**. This lets only your own phone reach Chacha.
-5. At the end a page opens in your browser called **"Set up your phone"**. Go to Part 2.
+5. At the end a page opens in your browser called **"Set up your phone"**. Follow the optional phone setup below.
 
-## Part 2: The phone (follow the page)
+## Optional Android phone setup
 
 The page has 3 steps, each with a code you scan:
 

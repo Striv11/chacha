@@ -1,6 +1,6 @@
 """Full Gmail access. One-time setup: python -m brain.gmail (needs data/google_client.json).
 Reading is open to Chacha; sending only happens after the user's tap. Banking mail is never returned."""
-import base64, hashlib, json, secrets, time, webbrowser
+import base64, hashlib, json, secrets, threading, time, webbrowser
 from email.message import EmailMessage
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlencode, urlsplit
@@ -10,9 +10,16 @@ from .config import DATA
 
 CLIENT = DATA / "google_client.json"
 TOKEN = DATA / "google_token.json"
-SCOPES = "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send"
+SCOPES = " ".join((
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/calendar.events",
+))
 API = "https://gmail.googleapis.com/gmail/v1/users/me"
 NOT_CONNECTED = {"error": "Gmail is not connected yet. Tell the user to finish the Gmail setup on the laptop."}
+_login = {"status": "idle", "error": ""}
+_login_lock = threading.Lock()
 
 
 def accounts():
@@ -21,6 +28,20 @@ def accounts():
 
 def connected():
     return bool(accounts())
+
+
+def configured():
+    return CLIENT.exists()
+
+
+def status():
+    out = {"configured": configured(), "connected": connected(), **_login}
+    if connected():
+        try:
+            out["email"] = _req("GET", "/profile").get("emailAddress", "")
+        except Exception as e:
+            out["error"] = f"Google connection needs attention: {type(e).__name__}"
+    return out
 
 
 def _client():
@@ -124,6 +145,8 @@ def dropped(limit=10):
 
 def login():
     """Opens Google's consent page, then stores the token in data/, which is never committed."""
+    if not configured():
+        raise FileNotFoundError("data/google_client.json is missing")
     c = _client()
     state, verifier = secrets.token_urlsafe(16), secrets.token_urlsafe(48)
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
@@ -133,7 +156,7 @@ def login():
         def do_GET(self):
             got.update({k: v[0] for k, v in parse_qs(urlsplit(self.path).query).items()})
             self.send_response(200); self.end_headers()
-            self.wfile.write(b"Chacha is connected to Gmail. You can close this tab.")
+            self.wfile.write(b"Chacha is connected to Gmail and Google Calendar. You can close this tab.")
 
         def log_message(self, *a):
             pass
@@ -146,7 +169,9 @@ def login():
         "code_challenge": challenge, "code_challenge_method": "S256"})
     print("Opening Google sign-in. If nothing opens, visit:\n" + url, flush=True)
     webbrowser.open(url)
-    while "code" not in got and "error" not in got:
+    server.timeout = 1
+    deadline = time.time() + 300
+    while "code" not in got and "error" not in got and time.time() < deadline:
         server.handle_request()
     if got.get("state") != state or "code" not in got:
         raise SystemExit("Sign-in was cancelled or failed.")
@@ -157,8 +182,27 @@ def login():
     t = r.json()
     target = TOKEN if not TOKEN.exists() else DATA / f"google_token_{len(accounts()) + 1}.json"
     target.write_text(json.dumps({"access_token": t["access_token"], "refresh_token": t["refresh_token"],
-                                 "expires": time.time() + t.get("expires_in", 3600)}), encoding="utf8")
-    print("Gmail connected.")
+                                 "expires": time.time() + t.get("expires_in", 3600), "scope": SCOPES}), encoding="utf8")
+    target.chmod(0o600)
+    print("Gmail and Google Calendar connected.")
+
+
+def start_login():
+    """Start the user-controlled OAuth flow without blocking the API server."""
+    with _login_lock:
+        if _login["status"] == "waiting":
+            return dict(_login)
+        _login.update(status="waiting", error="")
+
+    def run():
+        try:
+            login()
+            _login.update(status="connected", error="")
+        except BaseException as e:
+            _login.update(status="error", error=str(e) or type(e).__name__)
+
+    threading.Thread(target=run, name="google-oauth", daemon=True).start()
+    return dict(_login)
 
 
 if __name__ == "__main__":
