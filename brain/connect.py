@@ -1,7 +1,7 @@
 """Opens a step-by-step page in the browser that sets up the phone: Tailscale, the Chacha app, then the
 connect code. The connect code holds the secret token, so it is never printed, and the page is deleted
 as soon as you're done."""
-import html, json, os, subprocess, shutil, time
+import html, json, os, subprocess, shutil, time, webbrowser
 import segno
 from .config import BRAIN_TOKEN, DATA
 
@@ -124,7 +124,10 @@ def main():
     path = DATA / "connect_phone.html"
     path.write_text(page, encoding="utf8")
     try:
-        os.startfile(path)
+        if hasattr(os, "startfile"):
+            os.startfile(path)
+        else:
+            webbrowser.open(path.as_uri())
         print("\nA page with 3 steps has opened in your browser. Follow it with your phone.")
         input("When Chacha on your phone says \"You're all set\", press Enter here to close.")
     finally:

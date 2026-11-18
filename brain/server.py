@@ -1,6 +1,7 @@
 """HTTP API the phone talks to (over Tailscale). Run: python -m brain.server"""
 import time, json, threading, traceback, secrets, shutil, subprocess
 from fastapi import Body, FastAPI, Header, HTTPException
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 import uvicorn
 from . import db, think, agents, voice, llm, gmail, telegram
@@ -9,6 +10,42 @@ from .banking import is_banking
 from .config import BRAIN_TOKEN, THINK_EVERY_MIN, KILL_FILE
 
 app = FastAPI(title="Chacha")
+
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+def home():
+    """A friendly landing page when the laptop address is opened in a browser."""
+    return """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chacha is running</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    body { min-height: 100vh; margin: 0; display: grid; place-items: center; background: #0b1020; color: #f8fafc; }
+    main { width: min(520px, calc(100% - 48px)); padding: 40px; border: 1px solid #27324a; border-radius: 24px; background: #121a2d; box-shadow: 0 24px 80px #0008; }
+    .status { display: inline-flex; align-items: center; gap: 9px; color: #86efac; font-weight: 700; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 16px #22c55e; }
+    h1 { margin: 18px 0 10px; font-size: clamp(34px, 8vw, 56px); letter-spacing: -0.04em; }
+    p { color: #b6c2d9; font-size: 17px; line-height: 1.6; }
+    a { display: inline-block; margin-top: 18px; padding: 13px 18px; border-radius: 12px; background: #2563eb; color: white; font-weight: 700; text-decoration: none; }
+    small { display: block; margin-top: 24px; color: #74819a; }
+  </style>
+</head>
+<body><main>
+  <div class="status"><span class="dot"></span>Online</div>
+  <h1>Chacha is running.</h1>
+  <p>Your private assistant backend is online on this Mac. We can now build and test the browser or iPhone experience on top of it.</p>
+  <a href="/docs">Open developer API</a>
+  <small>This address is private to your Tailscale network.</small>
+</main></body>
+</html>"""
+
+
+@app.get("/health", include_in_schema=False)
+def health():
+    return {"status": "ok"}
 
 
 @app.get("/app")

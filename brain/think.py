@@ -342,7 +342,9 @@ def ask(question):
     db.run("UPDATE agents SET status='done', question=NULL WHERE origin='chat' AND status='waiting'")
     history = json.loads(db.get("chat_history", "[]"))
     context = "\n".join(f"{h['who']}: {h['text']}" for h in history)
-    goal = (f"Answer the user's message. Check your tools for anything about their life, calendar, people or the internet.\n"
+    goal = (f"Answer the user's message. For greetings, general questions, writing, or requests that need no personal data, "
+            "answer directly without calling a tool. Only check tools when the answer genuinely depends on the user's "
+            "calendar, tasks, people, messages, location, or current information.\n"
             "Never hand the user's question back to them, and don't ask what they mean when you can look it up. "
             "For questions about their day or plan, check the calendar AND open tasks, people waiting on a reply and reminders, "
             "then answer from that. If you really find nothing, say so in one line and suggest one useful next step.\n")
