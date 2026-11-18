@@ -86,7 +86,12 @@ try {
         ollama pull $m
         if ($LASTEXITCODE -ne 0) { throw "The AI download stopped. Check the internet connection and run this again; it continues where it left off." }
     }
-    if ($ramGB -lt 12) { (Get-Content ".env" -Raw) -replace "(?m)^SMART_MODEL=.*$", "SMART_MODEL=qwen3:4b" | Set-Content ".env" -NoNewline -Encoding utf8 }
+    if ($ramGB -lt 12) {
+        $e = (Get-Content ".env" -Raw) -replace "(?m)^SMART_MODEL=.*$", "SMART_MODEL=qwen3:4b"
+        if ($e -match "(?m)^CONTEXT_TOKENS=") { $e = $e -replace "(?m)^CONTEXT_TOKENS=.*$", "CONTEXT_TOKENS=8192" } else { $e += "`nCONTEXT_TOKENS=8192`n" }
+        Set-Content ".env" $e -NoNewline -Encoding utf8
+        Info "Using a smaller reading window so the AI fits in $ramGB GB."
+    }
     Ok "The AI is ready. It runs on this laptop only."
 
     Step 6 "Private link to your phone (Tailscale)"

@@ -8,6 +8,7 @@ from .config import OLLAMA_URL, FAST_MODEL, SMART_MODEL
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-opus-5-5")
 CLAUDE_FAST_MODEL = os.getenv("CLAUDE_FAST_MODEL", CLAUDE_MODEL)
 CLAUDE_EFFORT = os.getenv("CLAUDE_EFFORT", "medium")
+CONTEXT = int(os.getenv("CONTEXT_TOKENS", "16384"))  # how much the local AI reads at once; 8192 on 8 GB laptops
 
 _client = None
 
@@ -39,7 +40,7 @@ def _claude(messages, model, as_json):
 
 def _ollama(messages, model, as_json, temperature):
     body = {"model": model, "messages": messages, "stream": False, "think": False,
-            "options": {"temperature": temperature, "num_ctx": 8192}}
+            "options": {"temperature": temperature, "num_ctx": CONTEXT}}
     if as_json:
         body["format"] = "json"
     for attempt in range(3):  # Ollama occasionally returns a 500 mid-answer
