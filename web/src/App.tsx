@@ -1,6 +1,5 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Activity,
   ArrowRight,
   Bot,
   Check,
@@ -29,15 +28,16 @@ import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader } from "./components/ui/card";
 import { Input } from "./components/ui/input";
 
-type Task = { id: number; title: string; due: string; kind: string; status: string };
+type Task = { id: number; title: string; due: string; kind: string; status: string; source_item?: number };
 type Action = { id: number; kind: string; summary: string; payload: string };
 type Notice = { id: number; ts: number; title: string; body: string; kind: string; seen: number };
 type Agent = { id: number; goal: string; status: string; result?: string; question?: string; steps: number };
+type Followup = { id: number; ts: number; source: string; app: string; person: string; summary: string; text: string; importance: number; raw?: string };
 type Settings = { brain: string; claude_ready: boolean };
 type AskResult = { id: number; status: string; result?: string; question?: string };
 type GoogleIntegration = { configured: boolean; connected: boolean; status: string; error?: string; email?: string; calendar_synced_at: number };
 type Integrations = { google: GoogleIntegration };
-type Dashboard = { tasks: Task[]; actions: Action[]; notices: Notice[]; agents: Agent[]; settings: Settings; integrations: Integrations };
+type Dashboard = { tasks: Task[]; actions: Action[]; notices: Notice[]; agents: Agent[]; followups: Followup[]; settings: Settings; integrations: Integrations };
 type ChatMessage = { role: "user" | "assistant"; text: string };
 
 const TOKEN_KEY = "chacha.brain-token";
@@ -153,19 +153,22 @@ function DashboardApp({ token, disconnect }: { token: string; disconnect: () => 
   const [briefing, setBriefing] = useState(false);
   const [integrationBusy, setIntegrationBusy] = useState(false);
   const [integrationNote, setIntegrationNote] = useState("");
+  const [drafts, setDrafts] = useState<Record<number, string>>({});
+  const [drafting, setDrafting] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setError("");
     try {
-      const [tasks, actions, notices, agents, settings, integrations] = await Promise.all([
+      const [tasks, actions, notices, agents, followups, settings, integrations] = await Promise.all([
         api<Task[]>("/tasks", token),
         api<Action[]>("/actions", token),
         api<Notice[]>("/notifications?since=0", token),
         api<Agent[]>("/agents", token),
+        api<Followup[]>("/followups", token),
         api<Settings>("/settings", token),
         api<Integrations>("/integrations", token),
       ]);
-      setData({ tasks, actions, notices, agents, settings, integrations });
+      setData({ tasks, actions, notices, agents, followups, settings, integrations });
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) disconnect();
       else setError("Could not refresh Chacha. The local brain may be restarting.");
@@ -193,6 +196,27 @@ function DashboardApp({ token, disconnect }: { token: string; disconnect: () => 
   async function reject(action: Action) {
     await api(`/actions/${action.id}/result`, token, { method: "POST", body: JSON.stringify({ status: "rejected", note: "Dismissed from web dashboard" }) });
     setData((current) => current ? { ...current, actions: current.actions.filter((item) => item.id !== action.id) } : current);
+  }
+
+  async function resolveFollowup(followup: Followup) {
+    await api(`/followups/${followup.id}/done`, token, { method: "POST", body: "{}" });
+    setData((current) => current ? {
+      ...current,
+      followups: current.followups.filter((item) => item.id !== followup.id),
+      tasks: current.tasks.filter((item) => item.source_item !== followup.id),
+    } : current);
+  }
+
+  async function draftFollowup(followup: Followup) {
+    setDrafting(followup.id);
+    try {
+      const result = await api<{ text: string }>(`/followups/${followup.id}/draft`, token, { method: "POST", body: "{}" });
+      setDrafts((current) => ({ ...current, [followup.id]: result.text }));
+    } catch (err) {
+      setDrafts((current) => ({ ...current, [followup.id]: err instanceof Error ? err.message : "Could not prepare a reply." }));
+    } finally {
+      setDrafting(null);
+    }
   }
 
   async function ask(event: FormEvent) {
@@ -292,7 +316,30 @@ function DashboardApp({ token, disconnect }: { token: string; disconnect: () => 
           <Stat icon={ListTodo} label="Open tasks" value={data?.tasks.length || 0} tone="bg-orange-100 text-orange-700" />
           <Stat icon={Inbox} label="Pending approvals" value={data?.actions.length || 0} tone="bg-violet-100 text-violet-700" />
           <Stat icon={Bot} label="Agents working" value={activeAgents.length} tone="bg-sky-100 text-sky-700" />
-          <Stat icon={Activity} label="Recent signals" value={latestNotices.length} tone="bg-emerald-100 text-emerald-700" />
+          <Stat icon={MessageCircle} label="Open follow-ups" value={data?.followups.length || 0} tone="bg-emerald-100 text-emerald-700" />
+        </section>
+
+        <section className="mt-4">
+          <Card>
+            <CardHeader>
+              <div><Badge className="bg-emerald-50 text-emerald-700">Follow-through</Badge><h2 className="mt-3 text-xl font-semibold tracking-[-.025em]">People waiting on you</h2><p className="mt-1 text-sm text-stone-500">Every suggestion includes the message that triggered it.</p></div>
+              <span className="text-xs text-stone-400">{data?.followups.length || 0} open</span>
+            </CardHeader>
+            <CardContent className="grid gap-3 lg:grid-cols-2">
+              {!data?.followups.length && <div className="lg:col-span-2"><Empty>No unanswered commitments found. Connect Gmail to start catching follow-ups.</Empty></div>}
+              {data?.followups.map((followup) => (
+                <article key={followup.id} className="rounded-2xl border border-stone-200 bg-stone-50/60 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><Badge>{followup.app || followup.source}</Badge>{followup.importance >= 4 && <Badge className="bg-orange-50 text-orange-700">Important</Badge>}</div><h3 className="mt-2 font-semibold">{followup.person || "Someone"}</h3><p className="mt-1 text-sm font-medium text-stone-700">{followup.summary || "May need a reply"}</p></div>
+                    <Button variant="ghost" size="icon" onClick={() => void resolveFollowup(followup)} aria-label="Mark follow-up done"><Check size={17} /></Button>
+                  </div>
+                  <blockquote className="mt-3 line-clamp-3 border-l-2 border-stone-300 pl-3 text-sm leading-6 text-stone-500">{followup.text}</blockquote>
+                  {drafts[followup.id] && <div className="mt-3 rounded-xl border border-emerald-100 bg-emerald-50/70 p-3"><p className="text-[10px] font-bold uppercase tracking-[.14em] text-emerald-700">Suggested reply</p><p className="mt-1.5 whitespace-pre-wrap text-sm leading-6 text-stone-700">{drafts[followup.id]}</p></div>}
+                  <div className="mt-4 flex items-center justify-between gap-3"><span className="text-xs text-stone-400">Received {timeAgo(followup.ts)}</span><Button variant="outline" size="sm" onClick={() => void draftFollowup(followup)} disabled={drafting === followup.id}>{drafting === followup.id ? <LoaderCircle className="animate-spin" size={14} /> : <Sparkles size={14} />} {drafts[followup.id] ? "Try another" : "Prepare reply"}</Button></div>
+                </article>
+              ))}
+            </CardContent>
+          </Card>
         </section>
 
         <section id="connections" className="mt-4 scroll-mt-24">

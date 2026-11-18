@@ -296,6 +296,44 @@ def tasks(x_token: str = Header("")):
     return db.rows("SELECT * FROM tasks WHERE status='open' ORDER BY due")
 
 
+@app.get("/followups")
+def followups(x_token: str = Header("")):
+    auth(x_token)
+    return db.rows("""SELECT i.id,i.ts,i.source,i.app,i.person,i.summary,i.text,i.importance,i.raw
+                      FROM items i
+                      WHERE i.category='needs_reply' AND i.direction='in' AND i.resolved=0
+                        AND NOT EXISTS (
+                          SELECT 1 FROM items reply
+                          WHERE reply.person=i.person AND reply.direction='out' AND reply.ts>i.ts
+                        )
+                      ORDER BY COALESCE(i.importance,0) DESC, i.ts DESC LIMIT 40""")
+
+
+@app.post("/followups/{iid}/done")
+def followup_done(iid: int, x_token: str = Header("")):
+    auth(x_token)
+    if not db.rows("SELECT 1 FROM items WHERE id=? AND category='needs_reply'", (iid,)):
+        raise HTTPException(404, "follow-up not found")
+    db.run("UPDATE items SET resolved=1 WHERE id=?", (iid,))
+    db.run("UPDATE tasks SET status='done' WHERE source_item=?", (iid,))
+    return {"ok": True}
+
+
+@app.post("/followups/{iid}/draft")
+def followup_draft(iid: int, x_token: str = Header("")):
+    auth(x_token)
+    rows = db.rows("SELECT person,text,summary FROM items WHERE id=? AND category='needs_reply'", (iid,))
+    if not rows:
+        raise HTTPException(404, "follow-up not found")
+    item = rows[0]
+    draft = llm.chat([{"role": "user", "content":
+        "Write the short reply the user should send. Match the language and tone. "
+        "Do not invent facts, dates or promises; if something is unknown, keep the reply open. "
+        "Return only the reply, with no label or quotation marks.\n"
+        f"From: {item['person']}\nMessage: {item['text'][:1800]}"}])
+    return {"text": draft.strip()}
+
+
 @app.get("/integrations")
 def integrations(x_token: str = Header("")):
     auth(x_token)
