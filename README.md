@@ -40,6 +40,8 @@ npm run dev
 
 Set `VITE_API_BASE=http://<your-tailscale-ip>:8765` for the Vite development server. Build the production bundle with `npm run build`, then restart Chacha.
 
+Run the fast unit suite with `.venv/bin/python -m unittest discover -s tests -v`. To measure real local-model follow-up quality against the English/Hinglish product cases, run `.venv/bin/python evals/run_followups.py` while Ollama is running.
+
 ### Connect Gmail and Google Calendar
 
 This is optional and keeps OAuth credentials and tokens inside the ignored `data/` directory.

@@ -26,24 +26,49 @@ def rules():
     return "; ".join(r["rule"] for r in db.rows("SELECT rule FROM feedback ORDER BY id DESC LIMIT 20")) or "none"
 
 
-def _process_one(it, now, r):
-    if not (it["text"] or "").strip():
-        db.run("UPDATE items SET processed=1 WHERE id=?", (it["id"],))
-        return
+def classify_message(text, person="", direction="in", now=None, learned_rules=None):
+    """Classify one message without touching the database, so quality can be evaluated safely."""
+    now = now or datetime.datetime.now().strftime("%a %Y-%m-%d %H:%M")
+    who = (f"The USER sent this to {person} via chat:"
+           if direction == "out" else f"{person or 'Someone'} sent this to the user via chat:")
     out = llm.chat([{"role": "user", "content": TAG_PROMPT.format(
-        now=now, rules=r, text=it["text"][:2000],
-        who=(f"The USER sent this to {it['person']} via {it['app']}:" if it["direction"] == "out"
-             else f"{it['person'] or 'Someone'} sent this to the user via {it['app']}:"))}],
-        as_json=True)
+        now=now, rules=learned_rules or rules(), text=str(text)[:2000], who=who)}],
+        smart=True, as_json=True)
     out = out if isinstance(out, dict) else {}
     cat = str(out.get("category", "")).strip().lower()
     out["category"] = cat if cat in CATS else "fyi"
     try:
-        imp = max(0, min(5, int(out.get("importance") or 0)))
+        out["importance"] = max(0, min(5, int(out.get("importance") or 0)))
     except (TypeError, ValueError):
-        imp = 2
+        out["importance"] = 2
     if out["category"] in ("spam", "otp"):
-        out["tasks"], imp = [], 0
+        out["tasks"], out["importance"] = [], 0
+    out["tasks"] = [task for task in (out.get("tasks") or []) if isinstance(task, dict) and task.get("title")]
+    plain = " ".join(str(text).lower().split())
+    words = plain.split()
+    # Small models overthink polite acknowledgements; they are not follow-ups on their own.
+    acknowledgement = r"(thanks?|thank you|got it|okay|ok|cool|perfect|done)"
+    if len(words) <= 8 and re.fullmatch(rf"{acknowledgement}([,! ]+{acknowledgement})*[!. ]*", plain):
+        out.update(category="fyi", importance=0, tasks=[])
+    # A promise made by the user is worth tracking even when the model forgets to create the task.
+    if direction == "out" and out["category"] == "promise":
+        out["importance"] = max(3, out["importance"])
+        if not out["tasks"]:
+            title = str(out.get("summary") or f"Keep promise to {person or 'recipient'}").strip()
+            out["tasks"] = [{"title": title[:160], "due": "", "kind": "promise"}]
+    # A broadcast event is context, not a todo, unless the sender actually asks the user to act or reply.
+    request_words = r"\b(please|can you|could you|will you|confirm|reply|rsvp|join us|attend)\b|\?"
+    if out["category"] == "event" and not re.search(request_words, plain):
+        out["tasks"] = []
+    return out
+
+
+def _process_one(it, now, r):
+    if not (it["text"] or "").strip():
+        db.run("UPDATE items SET processed=1 WHERE id=?", (it["id"],))
+        return
+    out = classify_message(it["text"], it["person"], it["direction"], now, r)
+    imp = out["importance"]
     db.run("UPDATE items SET category=?, importance=?, summary=?, processed=1 WHERE id=?",
            (out.get("category"), imp, out.get("summary"), it["id"]))
     for t in out.get("tasks") or []:
