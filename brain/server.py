@@ -1,21 +1,28 @@
 """HTTP API the phone talks to (over Tailscale). Run: python -m brain.server"""
 import time, json, threading, traceback, secrets, shutil, subprocess
 from fastapi import Body, FastAPI, Header, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
 from . import db, think, agents, voice, llm, gmail, telegram
 import re
 from .banking import is_banking
-from .config import BRAIN_TOKEN, THINK_EVERY_MIN, KILL_FILE
+from .config import BRAIN_TOKEN, THINK_EVERY_MIN, KILL_FILE, ROOT
 
 app = FastAPI(title="Chacha")
+WEB_DIST = ROOT / "web/dist"
+if (WEB_DIST / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=WEB_DIST / "assets"), name="web-assets")
 
 
-@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/", include_in_schema=False)
 def home():
-    """A friendly landing page when the laptop address is opened in a browser."""
-    return """<!doctype html>
+    """The web dashboard, with a small status page as the source-build fallback."""
+    dashboard = WEB_DIST / "index.html"
+    if dashboard.exists():
+        return FileResponse(dashboard)
+    return HTMLResponse("""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -40,7 +47,7 @@ def home():
   <a href="/docs">Open developer API</a>
   <small>This address is private to your Tailscale network.</small>
 </main></body>
-</html>"""
+</html>""")
 
 
 @app.get("/health", include_in_schema=False)
