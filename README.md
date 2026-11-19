@@ -42,6 +42,17 @@ Set `VITE_API_BASE=http://<your-tailscale-ip>:8765` for the Vite development ser
 
 Run the fast unit suite with `.venv/bin/python -m unittest discover -s tests -v`. To measure real local-model follow-up quality against the English/Hinglish product cases, run `.venv/bin/python evals/run_followups.py` while Ollama is running.
 
+### Test phone automation in an Android emulator
+
+On an Apple Silicon Mac, install the Android command-line tools and Java 17 once, then use the repo launcher:
+
+```bash
+brew install android-commandlinetools openjdk@17
+./scripts/android-emulator.sh
+```
+
+The launcher downloads an Android 15 ARM image, creates and boots `chacha_api35`, builds the debug APK, installs it, connects it to the local backend through the Mac's Tailscale address, and enables Chacha's accessibility service. Emulator-only bootstrap credentials are accepted only by a debuggable APK and are never compiled into the app. Start with a safe task such as “Open Settings and show me the battery usage screen.” Chacha will stop before send, payment, purchase, booking, delete, or confirmation actions.
+
 ### Connect Gmail and Google Calendar
 
 This is optional and keeps OAuth credentials and tokens inside the ignored `data/` directory.

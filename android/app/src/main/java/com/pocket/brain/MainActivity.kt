@@ -61,6 +61,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(s: Bundle?) {
         super.onCreate(s)
+        bootstrapEmulator()
         if (!getSharedPreferences("brain", MODE_PRIVATE).getBoolean("intro_done", false)) {
             startActivity(Intent(this, IntroActivity::class.java))
             finish()
@@ -75,6 +76,29 @@ class MainActivity : Activity() {
         startBreathing()
         renderHistory()
         selectTab(1)
+    }
+
+    /** Lets the local debug emulator be configured without putting secrets in the APK. */
+    private fun bootstrapEmulator() {
+        val debug = applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0
+        if (!debug || !intent.getBooleanExtra("chacha_emulator_setup", false)) return
+        val url = intent.getStringExtra("chacha_url")?.trim().orEmpty()
+        val token = intent.getStringExtra("chacha_token")?.trim().orEmpty()
+        if (url.isEmpty() || token.isEmpty()) return
+        Api(this).apply {
+            this.url = url
+            this.token = token
+        }
+        getSharedPreferences("brain", MODE_PRIVATE).edit().putBoolean("intro_done", true).apply()
+        Control.choose(
+            this,
+            setOf(
+                "com.android.settings",
+                "com.android.chrome",
+                "com.google.android.apps.maps",
+                "com.google.android.youtube",
+            ),
+        )
     }
 
     override fun onResume() {
@@ -393,6 +417,7 @@ class MainActivity : Activity() {
             runOnUiThread {
                 hideThinking()
                 addMessage("plim", reply)
+                refresh()
             }
         }
     }

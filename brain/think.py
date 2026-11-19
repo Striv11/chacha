@@ -344,6 +344,23 @@ _REPEAT = re.compile(r"(?i)\b(every\s?(day|morning|evening|night|week|hour|\d+\s
                      r"keep\s(checking|watching|tracking)|let me know when|tell me (when|whenever)|notify me (when|if)|"
                      r"alert me (when|if))\b")
 
+_PHONE_APPS = (
+    "whatsapp business", "bookmyshow", "makemytrip", "instagram", "whatsapp", "telegram", "flipkart",
+    "settings", "youtube", "spotify", "amazon", "blinkit", "swiggy", "zomato", "chrome", "maps",
+    "zepto", "uber", "ola",
+)
+
+
+def phone_app_request(text):
+    """Return the explicitly named phone app for an imperative app-control request."""
+    plain = " ".join(str(text).lower().split())
+    verb = r"(?:open|launch|use|go\s+to)"
+    for app in _PHONE_APPS:
+        if re.search(rf"\b{verb}\s+(?:the\s+)?{re.escape(app)}\b", plain):
+            return app.replace(" ", "_")
+    custom = re.search(rf"\b{verb}\s+(?:the\s+)?([a-z][a-z0-9 ._-]{{0,30}}?)\s+app\b", plain)
+    return custom.group(1).strip().replace(" ", "_") if custom else None
+
 
 def repeat_hours(text):
     """How often a request wants checking, or None if it isn't a repeating request."""
@@ -368,6 +385,15 @@ def ask(question):
     db.run("UPDATE agents SET status='done', question=NULL WHERE origin='chat' AND status='waiting'")
     history = json.loads(db.get("chat_history", "[]"))
     context = "\n".join(f"{h['who']}: {h['text']}" for h in history)
+    app = phone_app_request(question)
+    if app:
+        made = tools.phone_task(app, question)
+        if made.get("error"):
+            result = made["error"]
+        else:
+            result = f"Ready to use {app.replace('_', ' ')}. Review the action above, then tap Do it."
+        _save_chat(history, question, result)
+        return {"status": "done", "result": result, "question": None}
     goal = (f"Answer the user's message. For greetings, general questions, writing, or requests that need no personal data, "
             "answer directly without calling a tool. Only check tools when the answer genuinely depends on the user's "
             "calendar, tasks, people, messages, location, or current information.\n"
@@ -386,9 +412,13 @@ def ask(question):
     db.run("UPDATE agents SET status='running' WHERE id=?", (aid,))
     agents._loop(aid)
     out = db.rows("SELECT id,status,result,question FROM agents WHERE id=?", (aid,))[0]
-    history += [{"who": "User", "text": question[:300]}, {"who": "Chacha", "text": str(out["question"] or out["result"] or "")[:300]}]
+    _save_chat(history, question, out["question"] or out["result"] or "")
+    return out
+
+
+def _save_chat(history, question, answer):
+    history += [{"who": "User", "text": question[:300]}, {"who": "Chacha", "text": str(answer)[:300]}]
     db.put("chat_history", db.dumps(history[-12:]))
-    for who, text in (("in", question), ("out", out["question"] or out["result"] or "")):  # searchable forever
+    for who, text in (("in", question), ("out", answer)):  # searchable forever
         db.run("INSERT INTO items(ts,source,app,person,direction,text,category,processed) VALUES (?,?,?,?,?,?,?,1)",
                (time.time(), "chat", "chat", "Chacha", who, text, "fyi"))
-    return out
